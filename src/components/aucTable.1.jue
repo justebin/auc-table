@@ -1,0 +1,514 @@
+<template>
+  <div id="auc-table" class="container">
+    <b-container fluid>
+      <b-row>
+        <b-col md="3">
+          <b-input-group md="1">
+            <b-form-input v-model="createItems"></b-form-input>
+            <b-input-group-append>
+              <b-button variant="outline-primary">Create {{ createItems | selectedRows }}</b-button>
+            </b-input-group-append>
+          </b-input-group>
+        </b-col>
+        <b-col>
+          <b-button
+            class="float-right"
+            variant="success"
+            @click="addField(items[0])"
+          >Add Deliverable</b-button>
+        </b-col>
+        <b-col class="float-right" md="3">
+          <b-input-group class="float-right" md="1">
+            <b-form-input class="float-right" v-model.number="createColumns"></b-form-input>
+            <b-input-group-append>
+              <b-button
+                variant="success"
+                @click="addFields(fields, createColumns)"
+              >Add {{ ( createColumns + " Deliverable") | plural }}</b-button>
+            </b-input-group-append>
+          </b-input-group>
+        </b-col>
+      </b-row>
+      <br>
+      <!-- Main table element -->
+      <b-table
+        show-empty
+        stacked="md"
+        :items="items"
+        :fields="fields"
+        :current-page="currentPage"
+        :per-page="perPage"
+        :filter="filter"
+        :sort-by.sync="sortBy"
+        :sort-desc.sync="sortDesc"
+        :sort-direction="sortDirection"
+        @filtered="onFiltered"
+      >
+        <template slot="item_selection" slot-scope="row">
+          <b-form-checkbox v-model="row.item.ui_selected" @input="selectItems(items)"></b-form-checkbox>
+        </template>
+
+        <template
+          :slot="'HEAD_'+ field.key"
+          v-for="(field, index) in customFields"
+          slot-scope="data"
+        >
+          <div :key="index" @dblclick="field.edit = true;">
+            <b-row>
+              <b-col>
+                <span v-if="!field.edit">{{field.label}}</span>
+              </b-col>
+            </b-row>
+            <b-row>
+              <b-col>
+                <b-form-input
+                  v-if="field.edit"
+                  v-model="field.label"
+                  @blur="field.edit = false; $emit('update')"
+                  @keyup.enter="field.edit=false; $emit('update')"
+                  v-focus
+                  size="sm"
+                ></b-form-input>
+              </b-col>
+            </b-row>
+            <b-row>
+              <b-col>
+                <b-textarea
+                  v-if="field.edit"
+                  v-model="field.description"
+                  @blur="field.edit = false; $emit('update')"
+                  @keyup.enter="field.edit=false; $emit('update')"
+                  v-focus
+                  size="sm"
+                ></b-textarea>
+              </b-col>
+            </b-row>
+            <b-row>
+              <b-col>
+                <b-button v-if="field.edit" variant="danger">Delete</b-button>
+              </b-col>
+              <b-col>
+                <b-button v-if="field.edit" variant="success">Save</b-button>
+              </b-col>
+            </b-row>
+          </div>
+        </template>
+
+        <template v-for="(field, index) in customFields" :slot="field.key" slot-scope="data">
+          <b-table
+            striped
+            hover
+            small
+            stacked="md"
+            :items="innerItems"
+            :fields="innerFields"
+            :key="field.key"
+          >
+            <template slot="label" slot-scope="row">
+              <template v-if="inputType(row.item, data.item)=='read_write'">
+                <b-form-input
+                  @input="itemTotal(data.item); columnTotal(data.field.key)"
+                  v-model.number="data.item[data.field.key+'-'+row.item.mapsTo]"
+                  size="sm"
+                ></b-form-input>
+              </template>
+
+              <template v-else-if="data.item.type=='totals'">
+                <div>{{data.item["columnTotal-" + data.field.key + "-" +row.item.mapsTo]}}</div>
+              </template>
+
+              <template v-else>
+                <div>{{data.item[row.item.mapsTo]}}</div>
+              </template>
+            </template>
+          </b-table>
+        </template>
+
+        <!-- <template slot="HEAD_totals" slot-scope="data"></template> -->
+
+        <template v-if="(data.field.type=='total')" slot="totals" slot-scope="data">
+          <b-table striped hover small stacked="md" :items="innerItems" :fields="innerFields">
+            <template slot="label" slot-scope="row">
+
+              <template v-if="data.item.type=='total'">
+                {{data.item}}
+                <div>{{data.item["columnTotal-" + data.field.key + "-" +row.item.mapsTo]}}</div>
+              </template>
+
+              <template v-else>
+                <div>{{data.item["rowTotal-"+row.item.mapsTo]}}</div>
+              </template>
+            </template>
+          </b-table>
+          <!-- <b-button variant="success" @click="itemTotal(data.item)">Item Todal</b-button> -->
+        </template>
+
+        <template slot="info">
+          <b-table striped hover small stacked="md" :items="innerItems" :fields="innerFields"></b-table>
+        </template>
+
+        <template slot="region" slot-scope="row">
+          <vue-select :options="regions" v-model="row.item.region"/>
+        </template>
+
+        <template slot="role" slot-scope="row">
+          <vue-select label="name" :options="roles" v-model="row.item.role"/>
+        </template>
+
+        <template slot="role_name" slot-scope="row">
+          <b-form-input type="text" :placeholder="row.item.role_name"/>
+        </template>
+
+        <template slot="isActive" slot-scope="row">{{ row.value ? 'Yes :)' : 'No :(' }}</template>
+
+        <template slot="actions" slot-scope="row">
+          <b-button
+            size="sm"
+            @click="info(row.item, row.index, $event.target)"
+            class="mr-1"
+          >Info modal</b-button>
+          <b-button
+            size="sm"
+            @click="row.toggleDetails"
+          >{{ row.detailsShowing ? 'Hide' : 'Show' }} Details</b-button>
+        </template>
+
+        <template slot="row-details" slot-scope="row">
+          <b-card>
+            <ul>
+              <li v-for="(value, key) in row.item" :key="key">{{ key }}: {{ value }}</li>
+            </ul>
+          </b-card>
+        </template>
+      </b-table>
+      <!--
+      <b-row>
+        <b-col md="6" class="my-1">
+          <b-pagination
+            v-model="currentPage"
+            :total-rows="totalRows"
+            :per-page="perPage"
+            class="my-0"
+          ></b-pagination>
+        </b-col>
+      </b-row>
+      -->
+      <b-row>
+        <b-col>
+          <b-button class="float-left">Copy {{ selectedItems.length | selectedRows }}</b-button>
+          <b-button
+            class="float-right"
+            variant="danger"
+          >Remove {{ selectedItems.length | selectedRows }}</b-button>
+        </b-col>
+        <!--   <b-col><b-button>Copy {{ selectedItems.length | selectedRows }}</b-button></b-col>
+       
+       <b-col md="6" class="buttons-1">
+          
+          <b-button variant="danger">Remove {{ selectedItems.length | selectedRows }}</b-button>
+          <b-input-group md="2">
+            <b-form-input v-model="createItems"></b-form-input>
+            <b-input-group-append>
+              <b-button variant="outline-primary">Create {{ createItems | selectedRows }}</b-button>
+            </b-input-group-append>
+          </b-input-group>
+          <b-button variant="success" @click="addField">Add Field</b-button>
+        </b-col>-->
+      </b-row>
+
+      <!-- Info modal -->
+      <b-modal :id="infoModal.id" :title="infoModal.title" ok-only @hide="resetInfoModal">
+        <pre>{{ infoModal.content }}</pre>
+      </b-modal>
+    </b-container>
+    {{ customFields }}
+    <br>
+    <br>
+    {{ items }}
+  </div>
+</template>
+
+<script lang="ts">
+import { Component, Prop, Vue } from "vue-property-decorator";
+
+import jsonpath from "jsonpath";
+import BootstrapVue from "bootstrap-vue";
+import { VueSelect } from "vue-select";
+import _ from "lodash";
+
+import "bootstrap/dist/css/bootstrap.css";
+import "bootstrap-vue/dist/bootstrap-vue.css";
+import "vue-select/dist/vue-select.css";
+
+import WWorker from "vue-worker";
+Vue.use(WWorker);
+
+Vue.use(BootstrapVue);
+
+@Component({
+  name: "aucTable",
+  filters: {
+    selectedRows: function(selected: any) {
+      return selected + " row" + (selected > 1 ? "s" : "");
+    },
+    plural: function(value: any) {
+      let val = Number(value.split(" ")[0]);
+      return value + (val > 1 ? "s" : "");
+    }
+  },
+  components: {
+    VueSelect
+  }
+})
+export default class aucTable extends Vue {
+  @Prop() private aucData!: string;
+
+  private innerItems: any;
+  private fields: any;
+  private infoModal: any;
+  private selectedItems: any;
+  private items: any;
+  private totalRows: number = 1;
+  private currentPage: number = 1;
+  private perPage: number = 5;
+  private pageOptions: Array<number> = [5, 10, 15];
+  private sortBy: any = null;
+  private sortDesc: boolean = false;
+  private sortDirection: string = "asc";
+  private filter: any = null;
+  private createItems: number = 1;
+  private createColumns: number = 1;
+  private regions: any;
+  private roles: any;
+  private customFields: Array<any> = [];
+
+  private innerFields: any;
+
+  private inputData: any = JSON.parse(this.aucData);
+  constructor() {
+    super();
+
+    let inputData = JSON.parse(this.aucData);
+    this.innerItems = inputData.innerItems;
+    this.fields = inputData.fields;
+    this.infoModal = inputData.infoModal;
+    this.selectedItems = inputData.selectedItems;
+    this.totalRows = inputData.totalRows;
+    this.items = inputData.items;
+    this.innerFields = inputData.innerFields;
+    this.createItems = inputData.createItems;
+    this.regions = inputData.regions;
+    this.roles = inputData.roles;
+
+    //
+    this.totalRows = this.items.length;
+    this.selectedItems = this.selectItems(this.items);
+    this.fields = this.applyIndex(this.fields);
+    this.customFields = this.filterCustomFields(this.fields);
+  }
+  get sortOptions() {
+    // Create an options list from our fields
+    return this.fields
+      .filter((f: any) => f.sortable)
+      .map((f: any) => {
+        return {
+          text: f.label,
+          value: f.key
+        };
+      });
+  }
+
+  requiresUserInput(item: any) {
+    console.log(item);
+    //console.log(field);
+    return (
+      item.type &&
+      item.type.includes("user_input") &&
+      !item.type.includes("total")
+    );
+  }
+  inputType(row: any, column: any) {
+    let type = "read_only";
+
+    let rowType = row.type ? row.type : type;
+    let fieldType = column.type ? column.type : type;
+
+    //console.log(field);
+    if (rowType.includes("user_input")) {
+      type = "read_write";
+    }
+
+    if (fieldType.includes("total")) {
+      type = "read_only";
+    }
+    return type;
+  }
+
+  info(item: any, index: number, button: any) {
+    this.infoModal.title = `Row index: ${index}`;
+    this.infoModal.content = JSON.stringify(item, null, 2);
+    this.$root.$emit("bv::show::modal", this.infoModal.id, button);
+  }
+
+  resetInfoModal() {
+    this.infoModal.title = "";
+    this.infoModal.content = "";
+  }
+
+  onFiltered(filteredItems: any) {
+    // Trigger pagination to update the number of buttons/pages due to filtering
+    this.totalRows = filteredItems.length;
+    //this.currentPage = 1
+  }
+  selectItems(items: any) {
+    this.selectedItems = jsonpath.query(items, "$..[?(@.ui_selected==true)]");
+    return this.selectedItems;
+  }
+
+  filterCustomFields(fields: any) {
+    this.customFields = jsonpath.query(fields, '$..[?(@.type === "custom")]');
+    return this.customFields;
+  }
+
+  addFields(fieldsArray: Array<any>, newFields: number) {
+    const val = {
+      index: 0,
+      key: "",
+      label: "",
+      type: "custom",
+      edit: false
+    };
+
+    let customFields = this.filterCustomFields(this.fields);
+
+    let customField = customFields[customFields.length - 1];
+    let lastIndex = customField.index;
+
+    //val.key = "customField-" + customFields.length;
+    //val.label = "Deliverable " + (customFields.length + 1);
+
+    let startIndex = lastIndex + 1;
+    let endIndex = startIndex + newFields;
+    let customFieldIndex = customFields.length;
+
+    let indices = _.range(startIndex, endIndex);
+    indices.forEach((index: number) => {
+      const newval = _.clone(val);
+      //newval.index = index;
+      newval.key = "customField~" + ++customFieldIndex;
+      newval.label = "Deliverable " + customFieldIndex;
+      fieldsArray.splice(index, 0, newval);
+      //console.log(fieldsArray);
+      return;
+    });
+    console.log("new Fields");
+    console.log(fieldsArray);
+    //this.fields = this.fields;
+    this.fields = this.applyIndex(fieldsArray);
+    console.log(this.fields);
+    // To re-render the columns
+    this.filterCustomFields(this.fields);
+  }
+
+  applyIndex(objectArr: any) {
+    objectArr.forEach((e: any, i: number) => (e.index = i));
+    return objectArr;
+  }
+
+  itemTotal(item: any) {
+    const total = Object.keys(item)
+      .filter(key => key.includes("customField"))
+      .reduce((obj: any, key) => {
+        let calcKey: string = "rowTotal-" + key.split("-")[1];
+        obj[calcKey] = (obj[calcKey] ? obj[calcKey] : 0.0) + item[key];
+        return obj;
+      }, {});
+
+    Object.keys(total).map((key: string) => (item[key] = total[key]));
+    this.columnTotal("rowTotal");
+
+    this.$forceUpdate();
+  }
+
+  columnTotal(col_id: any) {
+    let items = this.items;
+    let totalItem = items.pop();
+
+    let columnTotal = items
+      .filter((el: any) => Object.keys(el).some(nel => nel.includes(col_id)))
+      .reduce(
+        (obj: any, item: any) => {
+          Object.keys(item)
+            .filter(key => key.includes("customField"))
+            .forEach((key: any) => {
+              let newKeys = key.split("-");
+              let newKey = newKeys[newKeys.length - 1];
+
+              let calcKey: string = "columnTotal-" + key;
+              obj[calcKey] = (obj[calcKey] ? obj[calcKey] : 0.0) + item[key];
+            });
+          return obj;
+        },
+        { type: "total", role_name: "Totals" }
+      );
+
+    items.push(columnTotal);
+    this.items = items;
+
+    console.log(columnTotal);
+    this.$forceUpdate();
+  }
+
+  addField(field: any) {
+    let fun = function(item: any) {
+      const total = Object.keys(item)
+        .filter(key => key.includes("customField"))
+        .reduce((obj: any, key) => {
+          let calcKey: string = "calcTotal-" + key.split("-")[2];
+          obj[calcKey] = (obj[calcKey] ? obj[calcKey] : 0.0) + item[key];
+          return obj;
+        }, {});
+
+      Object.keys(total).map((key: string) => (item[key] = total[key]));
+      console.log(total);
+    };
+
+    const initialActions = [
+      { message: "func1", func: () => "Working on func1" },
+      {
+        message: "calculateTotal",
+        func: fun
+      },
+      { message: "func3", func: () => "Working on func3" },
+      { message: "func4", func: () => "Working on func4" }
+    ];
+
+    let worker = this.$worker.create(initialActions);
+    worker
+      .postMessage("calculateTotal", [field])
+      .then(console.log) // logs ['Working on func1']
+      .catch(console.error); // logs any possible error
+  }
+}
+</script>
+
+<!-- Add "scoped" attribute to limit CSS to this component only -->
+<style scoped lang="stylus">
+h3 {
+  margin: 40px 0 0;
+}
+
+ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+li {
+  display: inline-block;
+  margin: 0 10px;
+}
+
+a {
+  color: #42b983;
+}
+</style>
